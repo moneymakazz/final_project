@@ -182,130 +182,121 @@ def update_dwh_dim_tables():
 # update_dwh_dim_tables()
 
 
-# # ЭТИ ФУНКЦИИ ПОКА НЕ РАБОТАЮТ НАДО ИСПРАВИТЬ
-# # Функция для создания исторической таблицы терминалов типа SCD2 и представления с этими данными
-# def create_terminal_hist():
-#     cursor.execute("""
-#         CREATE TABLE if not exists "DWH_DIM_TERMINALS_HIST" (
-#             id serial primary key,
-#             terminal_id VARCHAR(128),
-#             terminal_type VARCHAR(128),
-#             terminal_city VARCHAR(128),
-#             terminal_address VARCHAR(128),
-#             effective_from TIMESTAMP default CURRENT_TIMESTAMP,
-#             effective_to TIMESTAMP default (to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')),
-#             deleted_flg INTEGER default 0
-#             )
-#         """)
-#
-#     cursor.execute("""DROP VIEW if exists view_terminal_hist""")
-#
-#     cursor.execute("""
-#         CREATE VIEW view_terminal_hist AS
-#         SELECT
-#             terminal_id,
-#             terminal_type,
-#             terminal_city,
-#             terminal_address
-#         FROM "DWH_DIM_TERMINALS_HIST"
-#         WHERE deleted_flg = 0 and effective_to = to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
-#     """)
-#
-# # create_terminal_hist()
-#
-# # Функция для создания таблицы с новыми данными о терминалах
-# def create_terminals_new_rows():
-#     cursor.execute("""
-#         CREATE TABLE tmp_new_rows AS
-#             SELECT
-#                 t1.*
-#             FROM "STG_TERMINALS" t1
-#             LEFT JOIN view_terminal_hist t2 ON t1.terminal_id = t2.terminal_id
-#             WHERE t2.terminal_id is null
-#         """)
-#     conn.commit()
-#
-# # create_terminals_new_rows()
-#
-# def create_deleted_terminals_rows():
-#     cursor.execute("""
-#         CREATE TABLE tmp_deleted_rows AS
-#             SELECT
-#                 t1.*
-#             FROM view_terminal_hist t1
-#             LEFT JOIN "STG_TERMINALS" t2 ON t1.terminal_id = t2.terminal_id
-#             WHERE t2.terminal_id is null
-#         """)
-#     conn.commit()
-#
-# # create_deleted_terminals_rows()
-#
-# def create_update_terminals_rows():
-#     cursor.execute("""
-#         CREATE TABLE tmp_updated_rows AS
-#             SELECT t1.*
-#             FROM view_terminal_hist t1
-#             inner join "STG_TERMINALS" t2 on t1.terminal_id = t2.terminal_id
-#             and (
-#                 t1.terminal_type <> t2.terminal_type
-#                 or t1.terminal_city <> t2.terminal_city
-#                 or t1.terminal_address <> t2.terminal_city
-#             )
-#         """)
-#     conn.commit()
-#
-# # create_update_terminals_rows()
-#
-# # Функция для добавления данных в таблицу terminal_hist
-# def update_terminal_hist():
-#     # Добавление новых данных
-#     cursor.execute("""
-#         INSERT INTO "DWH_DIM_TERMINALS_HIST" (
-#             terminal_type, terminal_city, terminal_address
-#         )
-#         SELECT
-#             terminal_type, terminal_city, terminal_address
-#             from tmp_new_rows
-#         """)
-#     # Обновление поля effective_to
-#     cursor.execute("""
-#         UPDATE "DWH_DIM_TERMINALS_HIST"
-#         SET effective_to = DATE_TRUNC('second', now() - interval '1 second')
-#         WHERE terminal_id in(SELECT terminal_id FROM tmp_updated_rows)
-#         and effective_to = to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
-#     """)
-#     # Добавление измененных данных
-#     cursor.execute("""
-#         INSERT INTO "DWH_DIM_TERMINALS_HIST" (
-#             terminal_type, terminal_city, terminal_address, deleted_flg
-#         )
-#         SELECT terminal_type, terminal_city, terminal_address, 1
-#             from tmp_updated_rows
-#         """)
-#     # Изменение поля effective_to у удаленных товаров
-#     cursor.execute("""
-#         UPDATE "DWH_DIM_TERMINALS_HIST"
-#         SET effective_to = date_trunc('second', now() - interval '1 second')
-#         WHERE terminal_id in(SELECT terminal_id from tmp_deleted_rows)
-#         AND effective_to = to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
-#         """)
-#     # Добавление измененной версии записи, где deleted_flg = 1
-#     cursor.execute("""
-#         INSERT INTO "DWH_DIM_TERMINALS_HIST" (
-#             terminal_type, terminal_city, terminal_address
-#         )
-#         SELECT terminal_type, terminal_city, terminal_address
-#             from tmp_deleted_rows
-#         """)
-#     conn.commit()
-#
-# # update_terminal_hist()
-#
-# def remove_tmp_tables():
-#     cursor.execute("DROP TABLE if exists tmp_new_rows")
-#     cursor.execute("DROP TABLE if exists tmp_deleted_rows")
-#     cursor.execute("DROP TABLE if exists tmp_updated_rows")
-#     conn.commit()
+
+# Функция для создания исторической таблицы терминалов типа SCD2 и представления с этими данными
+def create_terminal_hist():
+    cursor.execute("""
+        CREATE TABLE if not exists "DWH_DIM_TERMINALS_HIST" (
+            id serial primary key,
+            terminal_id VARCHAR(128),
+            terminal_type VARCHAR(128),
+            terminal_city VARCHAR(128),
+            terminal_address VARCHAR(128),
+            effective_from TIMESTAMP default CURRENT_TIMESTAMP,
+            effective_to TIMESTAMP default (to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')),
+            deleted_flg INTEGER default 0
+            )
+        """)
+
+    cursor.execute("""DROP VIEW if exists view_terminal_hist""")
+
+    cursor.execute("""
+        CREATE VIEW view_terminal_hist AS
+        SELECT
+            terminal_id,
+            terminal_type,
+            terminal_city,
+            terminal_address
+        FROM "DWH_DIM_TERMINALS_HIST"
+        WHERE current_timestamp BETWEEN effective_from and effective_to;
+    """)
+
+# create_terminal_hist()
+
+# Функция для создания таблицы с новыми данными о терминалах
+def create_terminals_new_rows():
+    cursor.execute("""
+        CREATE TABLE tmp_new_rows AS
+            SELECT
+                t1.*
+            FROM "STG_TERMINALS" t1
+            LEFT JOIN view_terminal_hist t2 ON t1.terminal_id = t2.terminal_id
+            WHERE t2.terminal_id is null
+        """)
+    conn.commit()
+
+# create_terminals_new_rows()
+
+def create_deleted_terminals_rows():
+    cursor.execute("""
+        CREATE TABLE tmp_deleted_rows AS
+            SELECT
+                t1.*
+            FROM view_terminal_hist t1
+            LEFT JOIN "STG_TERMINALS" t2 ON t1.terminal_id = t2.terminal_id
+            WHERE t2.terminal_id is null
+        """)
+    conn.commit()
+
+# create_deleted_terminals_rows()
+
+def create_update_terminals_rows():
+    cursor.execute("""
+        CREATE TABLE tmp_updated_rows AS
+            SELECT t1.*
+            FROM "STG_TERMINALS" t1
+            inner join view_terminal_hist t2 on t1.terminal_id = t2.terminal_id
+            and (
+                t1.terminal_type <> t2.terminal_type
+                or t1.terminal_city <> t2.terminal_city
+                or t1.terminal_address <> t2.terminal_address
+            )
+        """)
+    conn.commit()
+
+# create_update_terminals_rows()
+
+# Функция для добавления данных в таблицу terminal_hist
+def update_terminal_hist():
+    # Добавление новых данных
+    cursor.execute("""
+        UPDATE "DWH_DIM_TERMINALS_HIST"
+        SET effective_to = date_trunc('second', now() - interval '1 second'),
+        deleted_flg = 1
+        WHERE terminal_id in(SELECT terminal_id from tmp_deleted_rows)
+        AND effective_to = to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
+        """)
+
+    cursor.execute("""
+        INSERT INTO "DWH_DIM_TERMINALS_HIST" (
+            terminal_id, terminal_type, terminal_city, terminal_address
+        )
+        SELECT terminal_id, terminal_type, terminal_city, terminal_address
+            from tmp_new_rows
+        """)
+    cursor.execute("""
+            UPDATE "DWH_DIM_TERMINALS_HIST"
+            SET effective_to = DATE_TRUNC('second', now() - interval '1 second')
+            WHERE terminal_id in(SELECT terminal_id FROM tmp_updated_rows)
+            and effective_to = to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
+        """)
+    cursor.execute("""
+          INSERT INTO "DWH_DIM_TERMINALS_HIST" (
+              terminal_id, terminal_type, terminal_city, terminal_address
+          )
+          SELECT terminal_id, terminal_type, terminal_city, terminal_address
+              from tmp_updated_rows
+          """)
+
+    conn.commit()
+
+# update_terminal_hist()
+
+def remove_tmp_tables():
+    cursor.execute("DROP TABLE if exists tmp_new_rows")
+    cursor.execute("DROP TABLE if exists tmp_deleted_rows")
+    cursor.execute("DROP TABLE if exists tmp_updated_rows")
+    conn.commit()
 
 
 # remove_tmp_tables()
@@ -365,7 +356,7 @@ def check_account_valid_to():
         JOIN "DWH_DIM_ACCOUNTS" t2 ON t1.client_id = t2.client
         JOIN "DWH_DIM_CARDS" t3 ON t2.account_num = t3.account_num
         JOIN "DWH_FACT_TRANSACTIONS" t4 ON t3.card_num = t4.card_num 
-        WHERE t4.oper_result = 'SUCCESS' and cast(t4.trans_date as DATE) >= DATE(t2.valid_to) 
+        WHERE t4.oper_result = 'SUCCESS' and cast(t4.trans_date as DATE) > DATE(t2.valid_to) 
     """)
     conn.commit()
 
@@ -416,21 +407,21 @@ def remove_fact_passport_table():
 
 
 
-# remove_tmp_tables()
+remove_tmp_tables()
 remove_fact_passport_table()
 remove_dim_tables()
-csv2sql("data/transactions_01032021.txt", conf, 'STG_TRANSACTIONS', 'bank')
-excel2sql("data/terminals_01032021.xlsx", conf, 'STG_TERMINALS', 'bank', )
-excel2sql("data/passport_blacklist_01032021.xlsx", conf, 'STG_PASSPORT_BLACKLIST', 'bank')
+csv2sql("data/transactions_03032021.txt", conf, 'STG_TRANSACTIONS', 'bank')
+excel2sql("data/terminals_03032021.xlsx", conf, 'STG_TERMINALS', 'bank', )
+excel2sql("data/passport_blacklist_03032021.xlsx", conf, 'STG_PASSPORT_BLACKLIST', 'bank')
 create_dwh_fact()
 update_dwh_fact()
 create_dwh_dim_tables()
 update_dwh_dim_tables()
-# create_terminal_hist()
-# create_terminals_new_rows()
-# create_deleted_terminals_rows()
-# create_update_terminals_rows()
-# update_terminal_hist()
+create_terminal_hist()
+create_terminals_new_rows()
+create_deleted_terminals_rows()
+create_update_terminals_rows()
+update_terminal_hist()
 create_rep_fraud()
 check_passport_valid_to()
 check_account_valid_to()
