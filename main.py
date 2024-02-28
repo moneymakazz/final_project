@@ -19,7 +19,24 @@ cursor.execute("create schema if not exists bank")
 cursor.execute("set search_path to bank")
 conn.commit()
 
-# Загрузка данных  за один из файла и перенос в архив
+
+# Функция для загрузки данных из SQL скрипта
+def sql_load(file_path, conf, schema_name):
+    try:
+        conf = psycopg2.connect(**conf)
+        cursor = conn.cursor()
+
+        with open(file_path, 'r', encoding='utf-8') as file:
+            script = file.read()
+            cursor.execute(script)
+        conn.commit()
+    except Exception as e:
+        print(f"Произошла ошибка: {str(e)}")
+
+
+# sql_load('ddl_dml.sql', conf, 'bank')
+
+# Функция для загрузки данных из csv файла и перенос файла в архив
 def csv2sql(file_path, conf, table_name, schema_name):
     try:
         engine = create_engine(f'postgresql://{conf["user"]}:{conf["password"]}@{conf["host"]}:{conf["port"]}/{conf["database"]}')
@@ -122,8 +139,8 @@ def create_dwh_dim_tables():
                 passport_num VARCHAR(128),
                 passport_valid_to DATE,
                 phone VARCHAR(128),
-                create_dt DATE,
-                update_dt DATE
+                create_dt DATE default current_date,
+                update_dt DATE default current_date
             )
             """)
     # Создание таблицы аккаунтов
@@ -132,8 +149,8 @@ def create_dwh_dim_tables():
                 account_num VARCHAR(128),
                 valid_to DATE,
                 client VARCHAR(128),
-                create_dt DATE,
-                update_dt DATE
+                create_dt DATE default current_date,
+                update_dt DATE default current_date
             )
             """)
    # Создание таблицы c карточками
@@ -141,47 +158,92 @@ def create_dwh_dim_tables():
             CREATE TABLE if not exists "DWH_DIM_CARDS" (
                 card_num VARCHAR(128),
                 account_num VARCHAR(128),
-                create_dt DATE,
-                update_dt DATE
+                create_dt DATE default current_date,
+                update_dt DATE default current_date
             )
             """)
     conn.commit()
 
 # create_dwh_dim_tables()
 
+
+
 # Функция для добавления данных в таблицы типа SCD1
 def update_dwh_dim_tables():
     cursor.execute("""
             INSERT INTO "DWH_DIM_CARDS" (
-                card_num, account_num, create_dt, update_dt
+                card_num, account_num
             )
             SELECT
-                card_num, account, create_dt, update_dt
+                card_num, account
                 from cards
             """)
     cursor.execute("""
             INSERT INTO "DWH_DIM_ACCOUNTS" (
-                account_num, valid_to, client, create_dt, update_dt
+                account_num, valid_to, client
             )
             SELECT
-                account, valid_to, client, create_dt, update_dt
+                account, valid_to, client
                 from accounts
             """)
     cursor.execute("""
             INSERT INTO "DWH_DIM_CLIENTS" (
                 client_id, last_name, first_name, patronymic, date_of_birth,
-                passport_num, passport_valid_to, phone, create_dt, update_dt
+                passport_num, passport_valid_to, phone
             )
             SELECT
                 client_id, last_name, first_name, patronymic, date_of_birth,
-                passport_num, passport_valid_to, phone, create_dt, update_dt
+                passport_num, passport_valid_to, phone
                 from clients
             """)
+    cursor.execute('drop table if exists cards')
+    cursor.execute('drop table if exists accounts')
+    cursor.execute('drop table if exists clients')
     conn.commit()
 
 # update_dwh_dim_tables()
 
+def create_function():
+    cursor.execute("""
+            CREATE OR REPLACE FUNCTION update_trigger_function()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.update_dt = now();
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            
+            DROP TRIGGER IF EXISTS trg_update_dwh_dim_clients on "DWH_DIM_CLIENTS";
+            DROP TRIGGER IF EXISTS trg_update_dwh_dim_clients on "DWH_DIM_ACCOUNTS";
+            DROP TRIGGER IF EXISTS trg_update_dwh_dim_clients on "DWH_DIM_CARDS";
+            
+        """)
+    conn.commit()
 
+# create_function()
+
+def create_trigger():
+    cursor.execute("""
+            CREATE TRIGGER trg_update_dwh_dim_clients
+            BEFORE UPDATE ON "DWH_DIM_CLIENTS"
+            FOR EACH ROW
+            EXECUTE FUNCTION update_trigger_function();
+            
+            CREATE TRIGGER trg_update_dwh_dim_clients
+            BEFORE UPDATE ON "DWH_DIM_ACCOUNTS"
+            FOR EACH ROW
+            EXECUTE FUNCTION update_trigger_function();
+            
+            CREATE TRIGGER trg_update_dwh_dim_clients
+            BEFORE UPDATE ON "DWH_DIM_CARDS"
+            FOR EACH ROW
+            EXECUTE FUNCTION update_trigger_function();
+            
+            
+    """)
+    conn.commit()
+
+# create_trigger()
 
 # Функция для создания исторической таблицы терминалов типа SCD2 и представления с этими данными
 def create_terminal_hist():
@@ -410,13 +472,16 @@ def remove_fact_passport_table():
 remove_tmp_tables()
 remove_fact_passport_table()
 remove_dim_tables()
-csv2sql("data/transactions_03032021.txt", conf, 'STG_TRANSACTIONS', 'bank')
-excel2sql("data/terminals_03032021.xlsx", conf, 'STG_TERMINALS', 'bank', )
-excel2sql("data/passport_blacklist_03032021.xlsx", conf, 'STG_PASSPORT_BLACKLIST', 'bank')
+sql_load('ddl_dml.sql', conf, 'bank')
+csv2sql("data/transactions_01032021.txt", conf, 'STG_TRANSACTIONS', 'bank')
+excel2sql("data/terminals_01032021.xlsx", conf, 'STG_TERMINALS', 'bank', )
+excel2sql("data/passport_blacklist_01032021.xlsx", conf, 'STG_PASSPORT_BLACKLIST', 'bank')
 create_dwh_fact()
 update_dwh_fact()
 create_dwh_dim_tables()
 update_dwh_dim_tables()
+create_function()
+create_trigger()
 create_terminal_hist()
 create_terminals_new_rows()
 create_deleted_terminals_rows()
