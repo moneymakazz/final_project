@@ -5,6 +5,7 @@ import shutil
 import os
 import csv
 
+# Устанавливаем соединение с базой данных PostgreSQL
 conf = {
     "host": "localhost",
     "database": "postgres",
@@ -14,13 +15,12 @@ conf = {
 }
 conn = psycopg2.connect(**conf)
 cursor = conn.cursor()
-
 cursor.execute("create schema if not exists bank")
 cursor.execute("set search_path to bank")
 conn.commit()
 
 
-# Функция для загрузки данных из SQL скрипта
+# Функция загрузки данных из SQL скрипта
 def sql_load(file_path, conf, schema_name):
     try:
         conf = psycopg2.connect(**conf)
@@ -34,9 +34,7 @@ def sql_load(file_path, conf, schema_name):
         print(f"Произошла ошибка: {str(e)}")
 
 
-# sql_load('ddl_dml.sql', conf, 'bank')
-
-# Функция для загрузки данных из csv файла и перенос файла в архив
+# Функция загрузки данных из csv файла и перенос файла в архив
 def csv2sql(file_path, conf, table_name, schema_name):
     try:
         engine = create_engine(f'postgresql://{conf["user"]}:{conf["password"]}@{conf["host"]}:{conf["port"]}/{conf["database"]}')
@@ -50,10 +48,8 @@ def csv2sql(file_path, conf, table_name, schema_name):
     except Exception as e:
         print(f"Произошла ошибка: {str(e)}")
 
-# csv2sql("data/transactions_01032021.txt", conf, 'STG_TRANSACTIONS', 'bank')
 
-
-# Загрузка данных из Excel и перенос файла в архив
+# Функция загрузки данных из Excel файла и перенос файла в архив
 def excel2sql(file_path, conf, table_name, schema_name):
     try:
         engine = create_engine(f'postgresql://{conf["user"]}:{conf["password"]}@{conf["host"]}:{conf["port"]}/{conf["database"]}')
@@ -68,17 +64,11 @@ def excel2sql(file_path, conf, table_name, schema_name):
         print(f"Произошла ошибка: {str(e)}")
 
 
-# excel2sql("data/terminals_01032021.xlsx", conf, 'STG_TERMINALS', 'bank')
-# excel2sql("data/passport_blacklist_01032021.xlsx", conf, 'STG_PASSPORT_BLACKLIST', 'bank')
-
-
-
-
-# Функция для создания таблиц фактов
+# Функция создания таблиц фактов
 def create_dwh_fact():
     # Создание таблицы фактов транзакций
     cursor.execute("""
-            CREATE TABLE if not exists "DWH_FACT_TRANSACTIONS" (
+            CREATE TABLE IF NOT EXISTS "DWH_FACT_TRANSACTIONS" (
                 trans_id VARCHAR(128),
                 trans_date TIMESTAMP,
                 card_num VARCHAR(128),
@@ -90,16 +80,15 @@ def create_dwh_fact():
         """)
     # Создание таблицы фактов черного списка паспортов
     cursor.execute("""
-            CREATE TABLE if not exists "DWH_FACT_PASSPORT_BLACKLIST" (
+            CREATE TABLE IF NOT EXISTS "DWH_FACT_PASSPORT_BLACKLIST" (
                 passport_num VARCHAR(128),
                 entry_dt DATE
             )
             """)
     conn.commit()
 
-# create_dwh_fact()
 
-# Функция для добавления данных в таблицы фактов
+# Функция добавления данных в таблицы фактов
 def update_dwh_fact():
     # Добавление данных из стейдж таблицы в таблицу фактов транзакций
     cursor.execute("""
@@ -109,7 +98,7 @@ def update_dwh_fact():
             SELECT
                 transaction_id, transaction_date::TIMESTAMP, card_num, oper_type,
                 CAST(REPLACE(amount, ',', '.') AS NUMERIC), oper_result, terminal
-                from "STG_TRANSACTIONS"
+                FROM "STG_TRANSACTIONS"
             """)
     # Добавление данных из стейдж таблицы в таблицу фактов черного списка паспортов
     cursor.execute("""
@@ -122,15 +111,12 @@ def update_dwh_fact():
             """)
     conn.commit()
 
-# update_dwh_fact()
 
-
-
-# Функция для создания таблиц типа SCD1
+# Функция создания таблиц типа SCD1
 def create_dwh_dim_tables():
     # Создание таблицы клиентов
     cursor.execute("""
-            CREATE TABLE if not exists "DWH_DIM_CLIENTS" (
+            CREATE TABLE IF NOT EXISTS "DWH_DIM_CLIENTS" (
                 client_id VARCHAR(128),
                 last_name VARCHAR(128),
                 first_name VARCHAR(128),
@@ -145,7 +131,7 @@ def create_dwh_dim_tables():
             """)
     # Создание таблицы аккаунтов
     cursor.execute("""
-            CREATE TABLE if not exists "DWH_DIM_ACCOUNTS" (
+            CREATE TABLE IF NOT EXISTS "DWH_DIM_ACCOUNTS" (
                 account_num VARCHAR(128),
                 valid_to DATE,
                 client VARCHAR(128),
@@ -153,9 +139,9 @@ def create_dwh_dim_tables():
                 update_dt DATE default current_date
             )
             """)
-   # Создание таблицы c карточками
+   # Создание таблицы с картами
     cursor.execute("""
-            CREATE TABLE if not exists "DWH_DIM_CARDS" (
+            CREATE TABLE IF NOT EXISTS "DWH_DIM_CARDS" (
                 card_num VARCHAR(128),
                 account_num VARCHAR(128),
                 create_dt DATE default current_date,
@@ -164,11 +150,8 @@ def create_dwh_dim_tables():
             """)
     conn.commit()
 
-# create_dwh_dim_tables()
 
-
-
-# Функция для добавления данных в таблицы типа SCD1
+# Функция добавления данных в таблицы типа SCD1
 def update_dwh_dim_tables():
     cursor.execute("""
             INSERT INTO "DWH_DIM_CARDS" (
@@ -196,19 +179,18 @@ def update_dwh_dim_tables():
                 passport_num, passport_valid_to, phone
                 from clients
             """)
-    cursor.execute('drop table if exists cards')
-    cursor.execute('drop table if exists accounts')
-    cursor.execute('drop table if exists clients')
+    cursor.execute('DROP TABLE IF EXISTS cards')
+    cursor.execute('DROP TABLE IF EXISTS accounts')
+    cursor.execute('DROP TABLE IF EXISTS clients')
     conn.commit()
 
-# update_dwh_dim_tables()
-
+# Функция создания хранимой функции для обновления значения update_dt, в случае изменения данных в таблицах типа SCD1
 def create_function():
     cursor.execute("""
             CREATE OR REPLACE FUNCTION update_trigger_function()
             RETURNS TRIGGER AS $$
             BEGIN
-                NEW.update_dt = now();
+                NEW.update_dt = NOW();
                 RETURN NEW;
             END;
             $$ LANGUAGE plpgsql;
@@ -216,12 +198,10 @@ def create_function():
             DROP TRIGGER IF EXISTS trg_update_dwh_dim_clients on "DWH_DIM_CLIENTS";
             DROP TRIGGER IF EXISTS trg_update_dwh_dim_clients on "DWH_DIM_ACCOUNTS";
             DROP TRIGGER IF EXISTS trg_update_dwh_dim_clients on "DWH_DIM_CARDS";
-            
-        """)
+            """)
     conn.commit()
 
-# create_function()
-
+# Функция создания триггера, который запускает функцию update_trigger_function
 def create_trigger():
     cursor.execute("""
             CREATE TRIGGER trg_update_dwh_dim_clients
@@ -237,19 +217,16 @@ def create_trigger():
             CREATE TRIGGER trg_update_dwh_dim_clients
             BEFORE UPDATE ON "DWH_DIM_CARDS"
             FOR EACH ROW
-            EXECUTE FUNCTION update_trigger_function();
-            
-            
-    """)
+            EXECUTE FUNCTION update_trigger_function();       
+            """)
     conn.commit()
 
-# create_trigger()
 
-# Функция для создания исторической таблицы терминалов типа SCD2 и представления с этими данными
+# Функция создания исторической таблицы терминалов типа SCD2 и представления с этими данными
 def create_terminal_hist():
     cursor.execute("""
-        CREATE TABLE if not exists "DWH_DIM_TERMINALS_HIST" (
-            id serial primary key,
+        CREATE TABLE IF NOT EXISTS "DWH_DIM_TERMINALS_HIST" (
+            id SERIAL PRIMARY KEY,
             terminal_id VARCHAR(128),
             terminal_type VARCHAR(128),
             terminal_city VARCHAR(128),
@@ -260,10 +237,10 @@ def create_terminal_hist():
             )
         """)
 
-    cursor.execute("""DROP VIEW if exists view_terminal_hist""")
+    cursor.execute("""DROP VIEW IF EXISTS "STG_VIEW_TERMINAL_HIST" """)
 
     cursor.execute("""
-        CREATE VIEW view_terminal_hist AS
+        CREATE VIEW "STG_VIEW_TERMINAL_HIST" AS
         SELECT
             terminal_id,
             terminal_type,
@@ -271,57 +248,54 @@ def create_terminal_hist():
             terminal_address
         FROM "DWH_DIM_TERMINALS_HIST"
         WHERE deleted_flg = 0 
-        and current_timestamp BETWEEN effective_from and effective_to;
+        and CURRENT_TIMESTAMP BETWEEN effective_from and effective_to;
     """)
 
-# create_terminal_hist()
 
-# Функция для создания таблицы с новыми данными о терминалах
+# Функция создания таблицы с новыми данными о терминалах
 def create_terminals_new_rows():
     cursor.execute("""
-        CREATE TABLE tmp_new_rows AS
+        CREATE TABLE "STG_TMP_NEW_ROWS" AS
             SELECT
                 t1.*
             FROM "STG_TERMINALS" t1
-            LEFT JOIN view_terminal_hist t2 ON t1.terminal_id = t2.terminal_id
-            WHERE t2.terminal_id is null
+            LEFT JOIN "STG_VIEW_TERMINAL_HIST" t2 ON t1.terminal_id = t2.terminal_id
+            WHERE t2.terminal_id IS NULL
         """)
     conn.commit()
 
-# create_terminals_new_rows()
-
+# Функция создания таблицы с удаленными данными о терминалах
 def create_deleted_terminals_rows():
     cursor.execute("""
-        CREATE TABLE tmp_deleted_rows AS
+        CREATE TABLE "STG_TMP_DELETED_ROWS" AS
             SELECT
                 t1.*
-            FROM view_terminal_hist t1
+            FROM "STG_VIEW_TERMINAL_HIST" t1
             LEFT JOIN "STG_TERMINALS" t2 
             ON t1.terminal_id = t2.terminal_id
-            WHERE t2.terminal_id is null
+            WHERE t2.terminal_id IS NULL
         """)
     conn.commit()
 
-# create_deleted_terminals_rows()
 
+# Функция создания таблицы с измененными данными о терминалах
 def create_update_terminals_rows():
     cursor.execute("""
-        CREATE TABLE tmp_updated_rows AS
+        CREATE TABLE "STG_TMP_UPDATED_ROWS" AS
             SELECT t2.*
-            FROM view_terminal_hist t1
-            inner join "STG_TERMINALS" t2 
+            FROM "STG_VIEW_TERMINAL_HIST" t1
+            JOIN "STG_TERMINALS" t2 
             ON t1.terminal_id = t2.terminal_id
-            and (
+            AND (
                 t1.terminal_type <> t2.terminal_type
-                or t1.terminal_city <> t2.terminal_city
-                or t1.terminal_address <> t2.terminal_address
+                OR t1.terminal_city <> t2.terminal_city
+                OR t1.terminal_address <> t2.terminal_address
             )
         """)
     conn.commit()
 
-# create_update_terminals_rows()
 
-# Функция для добавления данных в таблицу terminal_hist
+# Функция добавления данных в таблицу "DWH_DIM_TERMINALS_HIST"
 def update_terminal_hist():
     # Добавление новых данных
     cursor.execute("""
@@ -329,48 +303,40 @@ def update_terminal_hist():
                terminal_id, terminal_type, terminal_city, terminal_address
            )
            SELECT terminal_id, terminal_type, terminal_city, terminal_address
-               from tmp_new_rows
+               from "STG_TMP_NEW_ROWS"
            """)
+    # Обновление данных, которые изменились с указанием времени на текущее минус 1 секунда
     cursor.execute("""
         UPDATE "DWH_DIM_TERMINALS_HIST"
-        SET effective_to = date_trunc('second', now() - interval '1 second')
-        WHERE terminal_id in(SELECT terminal_id from tmp_updated_rows)
-        AND effective_to = to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
+        SET effective_to = date_trunc('second', NOW() - INTERVAL '1 second')
+        WHERE terminal_id in(SELECT terminal_id from "STG_TMP_UPDATED_ROWS")
+        AND effective_to = TO_TIMESTAMP('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
         """)
-
+    # Добавление обновленных данных
     cursor.execute("""
         INSERT INTO "DWH_DIM_TERMINALS_HIST" (
             terminal_id, terminal_type, terminal_city, terminal_address
         )
         SELECT terminal_id, terminal_type, terminal_city, terminal_address
-            from tmp_updated_rows
+            from "STG_TMP_UPDATED_ROWS"
         """)
+    # Обновление данных, которые были удалены с указанием времени на текущее минус 1 секунда, с установкой флага в значение 1
     cursor.execute("""
             UPDATE "DWH_DIM_TERMINALS_HIST"
-            SET effective_to = DATE_TRUNC('second', now() - interval '1 second'), deleted_flg = 1
-            WHERE terminal_id in(SELECT terminal_id FROM tmp_deleted_rows)
+            SET effective_to = DATE_TRUNC('second', NOW() - INTERVAL '1 second'), deleted_flg = 1
+            WHERE terminal_id in(SELECT terminal_id FROM "STG_TMP_DELETED_ROWS")
             and effective_to = to_timestamp('2999-12-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
         """)
+    # Добавление удаленных данных
     cursor.execute("""
           INSERT INTO "DWH_DIM_TERMINALS_HIST" (
               terminal_id, terminal_type, terminal_city, terminal_address
           )
           SELECT terminal_id, terminal_type, terminal_city, terminal_address
-              from tmp_deleted_rows
+              from "STG_TMP_DELETED_ROWS"
           """)
-
     conn.commit()
 
-# update_terminal_hist()
-
-def remove_tmp_tables():
-    cursor.execute("DROP TABLE if exists tmp_new_rows")
-    cursor.execute("DROP TABLE if exists tmp_deleted_rows")
-    cursor.execute("DROP TABLE if exists tmp_updated_rows")
-    conn.commit()
-
-
-# remove_tmp_tables()
 
 # Создание таблицы витрины с отчетом
 def create_rep_fraud():
@@ -386,105 +352,199 @@ def create_rep_fraud():
         """)
     conn.commit()
 
-# create_rep_fraud()
-
-
-
 
 # Создание представления для получения данных о просроченных паспортах
 def check_passport_valid_to():
     cursor.execute("""
-        CREATE VIEW view_passport_valid_to AS
+        CREATE VIEW "STG_VIEW_PASSPORT_VALID_TO" AS
         SELECT 
                 t1.trans_date AS event_dt,
                 t4.passport_num AS passport,
                 CONCAT_WS(' ', t4.last_name, t4.first_name, t4.patronymic) AS fio,
                 phone,
-                now() AS report_dt
+                NOW() AS report_dt
 
         FROM  "DWH_FACT_TRANSACTIONS" t1
         JOIN  "DWH_DIM_CARDS" t2 ON t1.card_num = t2.card_num
         JOIN  "DWH_DIM_ACCOUNTS" t3 ON t2.account_num = t3.account_num
         JOIN  "DWH_DIM_CLIENTS" t4 ON t3.client = t4.client_id
-        WHERE CAST(t4.passport_valid_to as DATE) < DATE(t1.trans_date) AND t1.oper_result = 'SUCCESS'
+        WHERE t4.passport_valid_to::DATE < t1.trans_date::DATE AND t1.oper_result = 'SUCCESS'
         """)
     conn.commit()
 
 
 
-# Создание представления для получения данных о недействующем договоре
+# Функция создания представления для получения данных о недействующих договорах
 def check_account_valid_to():
     cursor.execute(""" 
-        CREATE VIEW view_account_valid_to AS
+        CREATE VIEW "STG_VIEW_ACCOUNT_VALID_TO" AS
         SELECT
-                t4.trans_date as event_dt,
-                t1.passport_num as passport,
-                concat_ws(' ', t1.last_name, t1.first_name, t1.patronymic) as fio,
+                t4.trans_date AS event_dt,
+                t1.passport_num AS passport,
+                CONCAT_WS(' ', t1.last_name, t1.first_name, t1.patronymic) as fio,
                 t1.phone as phone,
-                now() as report_dt
+                NOW() as report_dt
                 
         FROM "DWH_DIM_CLIENTS" t1
         JOIN "DWH_DIM_ACCOUNTS" t2 ON t1.client_id = t2.client
         JOIN "DWH_DIM_CARDS" t3 ON t2.account_num = t3.account_num
         JOIN "DWH_FACT_TRANSACTIONS" t4 ON t3.card_num = t4.card_num 
-        WHERE t4.oper_result = 'SUCCESS' and cast(t4.trans_date as DATE) > DATE(t2.valid_to) 
+        WHERE t4.trans_date::DATE > t2.valid_to::DATE AND t4.oper_result = 'SUCCESS' 
     """)
     conn.commit()
+
+# Функция создания представления для получения данных о паспортах из черного списка
+def check_passport_in_blacklist():
+    cursor.execute("""
+        CREATE VIEW "STG_VIEW_PASSPORT_BLOCKED" AS
+        SELECT
+                t4.trans_date AS event_dt,
+                t1.passport_num AS passport,
+                CONCAT_WS(' ', t1.last_name, t1.first_name, t1.patronymic) AS fio,
+                t1.phone AS phone,
+                NOW() AS report_dt
+        
+        FROM "DWH_DIM_CLIENTS" t1
+        JOIN "DWH_DIM_ACCOUNTS" t2 ON t1.client_id = t2.client
+        JOIN "DWH_DIM_CARDS" t3 ON t2.account_num = t3.account_num
+        JOIN "DWH_FACT_TRANSACTIONS" t4 ON t3.card_num = t4.card_num
+        JOIN "DWH_FACT_PASSPORT_BLACKLIST" t5 ON t1.passport_num = t5.passport_num
+        AND t5.entry_dt < t4.trans_date AND t4.oper_result = 'SUCCESS'
+    """)
+    conn.commit()
+
+
+# Функция создания представлений для получения данных
+def check_different_city():
+    # Данные о картах и количестве разных городов больше 1, где были совершены операции
+    cursor.execute("""
+            CREATE VIEW "STG_VIEW_FOR_DIFFERENT_CITY"  AS
+            SELECT
+    		    card_num,
+    		    COUNT(DISTINCT t2.terminal_city) AS cnt_city
+            FROM "DWH_FACT_TRANSACTIONS" t1
+            LEFT JOIN "DWH_DIM_TERMINALS_HIST" t2 ON t1.terminal = t2.terminal_id
+            GROUP BY t1.card_num
+            HAVING COUNT(DISTINCT t2.terminal_city) > 1
+        """)
+    # Данные о клиентах, которые совершали операции в разных городах в течении часа
+    cursor.execute("""
+        CREATE VIEW "STG_VIEW_DIFFERENT_CITY" AS
+        SELECT
+		    t1.trans_date AS event_dt,
+		    t4.passport_num AS passport,
+		    CONCAT(t4.last_name, ' ', t4.first_name, ' ', t4.patronymic) AS fio,
+		    t4.phone,
+		    NOW() AS report_dt
+        FROM (
+	        SELECT
+	            card_num,
+	            MIN(current_city_date) AS trans_date
+            FROM (
+	            SELECT
+	                card_num,
+	                terminal_city AS current_city,
+	                trans_date AS current_city_date,
+	                LAG(terminal_city) OVER(PARTITION BY card_num ORDER BY trans_date) AS last_city,
+	                LAG(trans_date) OVER(PARTITION BY card_num ORDER BY trans_date) AS last_city_date
+                FROM (
+	                SELECT
+	                    t1.card_num,
+	                    t1.trans_date,
+	                    t3.terminal_city
+                    FROM "DWH_FACT_TRANSACTIONS" t1
+                    JOIN "STG_VIEW_FOR_DIFFERENT_CITY" t2 ON t1.card_num = t2.card_num
+                    LEFT JOIN "DWH_DIM_TERMINALS_HIST" t3 ON t1.terminal = t3.terminal_id
+                    )
+                    )
+                    WHERE (current_city_date - last_city_date) < INTERVAL '1 hour' AND last_city != current_city
+                    GROUP BY card_num) t1
+                    LEFT JOIN "DWH_DIM_CARDS" t2 ON t1.card_num = t2.card_num
+                    LEFT JOIN "DWH_DIM_ACCOUNTS" t3 ON t2.account_num = t3.account_num
+                    LEFT JOIN "DWH_DIM_CLIENTS" t4 ON t3.client = t4.client_id
+                """)
+    conn.commit()
+
 
 
 # Добавление данных в витрину
 def update_rep_fraud():
     cursor.execute("""
-        INSERT INTO "REP_FRAUD" (
-            event_dt, passport, fio, phone, event_type, report_dt
-        )
-        SELECT 
-            event_dt, passport, fio, phone, 'account expired', report_dt
-        FROM view_account_valid_to
-    """)
+        MERGE INTO "REP_FRAUD" AS target
+        USING "STG_VIEW_ACCOUNT_VALID_TO" AS source ON target.event_dt = source.event_dt
+        AND target.passport = source.passport
+        AND target.fio = source.fio
+        AND target.phone = source.phone
+        AND target.event_type = 'account expired'
+        WHEN NOT MATCHED THEN INSERT(event_dt, passport, fio, phone, event_type, report_dt)
+        VALUES(source.event_dt, source.passport, source.fio, source.phone, 'account expired', source.report_dt)
+        """)
     cursor.execute("""
-        INSERT INTO "REP_FRAUD" (
-            event_dt, passport, fio, phone, event_type, report_dt
-        )
-        SELECT
-            event_dt, passport, fio, phone, 'passport expired', report_dt
-        FROM view_passport_valid_to
+        MERGE INTO "REP_FRAUD" AS target
+        USING "STG_VIEW_PASSPORT_VALID_TO" AS source ON target.event_dt = source.event_dt
+        AND target.passport = source.passport
+        AND target.fio = source.fio
+        AND target.phone = source.phone
+        AND target.event_type = 'passport expired'
+        WHEN NOT MATCHED THEN INSERT(event_dt, passport, fio, phone, event_type, report_dt)
+        VALUES(source.event_dt, source.passport, source.fio, source.phone, 'passport expired', source.report_dt)
+        """)
+    cursor.execute("""
+        MERGE INTO "REP_FRAUD" AS target
+        USING "STG_VIEW_PASSPORT_BLOCKED" AS source ON target.event_dt = source.event_dt
+        AND target.passport = source.passport
+        AND target.fio = source.fio
+        AND target.phone = source.phone
+        AND target.event_type = 'passport blocked'
+        WHEN NOT MATCHED THEN INSERT(event_dt, passport, fio, phone, event_type, report_dt)
+        VALUES(source.event_dt, source.passport, source.fio, source.phone, 'passport blocked', source.report_dt)
+        """)
+    cursor.execute("""
+        MERGE INTO "REP_FRAUD" AS target
+        USING "STG_VIEW_DIFFERENT_CITY" AS source ON target.event_dt = source.event_dt
+        AND target.passport = source.passport
+        AND target.fio = source.fio
+        AND target.phone = source.phone
+        AND target.event_type = 'different city'
+        WHEN NOT MATCHED THEN INSERT(event_dt, passport, fio, phone, event_type, report_dt)
+        VALUES(source.event_dt, source.passport, source.fio, source.phone, 'different city', source.report_dt)
         """)
     conn.commit()
 
 
-
-
 # Удаление представлений перед новым запуском
 def remove_view():
-    cursor.execute("""DROP VIEW view_passport_valid_to""")
-    cursor.execute("""DROP VIEW view_account_valid_to""")
+    cursor.execute("""DROP VIEW "STG_VIEW_PASSPORT_VALID_TO" """)
+    cursor.execute("""DROP VIEW "STG_VIEW_ACCOUNT_VALID_TO" """)
+    cursor.execute("""DROP VIEW "STG_VIEW_PASSPORT_BLOCKED" """)
+    cursor.execute("""DROP VIEW "STG_VIEW_DIFFERENT_CITY" """)
+    cursor.execute("""DROP VIEW "STG_VIEW_FOR_DIFFERENT_CITY" """)
     conn.commit()
 
 
 
-# Функция для удаления таблиц типа SCD1 перед новым запуском программы
-def remove_dim_tables():
-    cursor.execute("""DROP TABLE if exists "DWH_DIM_CLIENTS" """)
-    cursor.execute("""DROP TABLE if exists "DWH_DIM_ACCOUNTS" """)
-    cursor.execute("""DROP TABLE if exists "DWH_DIM_CARDS" """)
+# Функция удаления таблиц перед новым запуском программы
+def remove_tables():
+    cursor.execute("""DROP TABLE IF EXISTS "DWH_DIM_CLIENTS" """)
+    cursor.execute("""DROP TABLE IF EXISTS "DWH_DIM_ACCOUNTS" """)
+    cursor.execute("""DROP TABLE IF EXISTS "DWH_DIM_CARDS" """)
+    cursor.execute("""DROP TABLE IF EXISTS "DWH_FACT_PASSPORT_BLACKLIST" """)
     conn.commit()
 
-
-
-def remove_fact_passport_table():
-    cursor.execute("""DROP TABLE if exists "DWH_FACT_PASSPORT_BLACKLIST" """)
+def remove_tmp_tables():
+    cursor.execute("""DROP TABLE IF EXISTS "STG_TMP_NEW_ROWS" """)
+    cursor.execute("""DROP TABLE IF EXISTS "STG_TMP_DELETED_ROWS" """)
+    cursor.execute("""DROP TABLE IF EXISTS "STG_TMP_UPDATED_ROWS" """)
     conn.commit()
 
 
 
 remove_tmp_tables()
-remove_fact_passport_table()
-remove_dim_tables()
+remove_tables()
 sql_load('ddl_dml.sql', conf, 'bank')
-csv2sql("data/transactions_03032021.txt", conf, 'STG_TRANSACTIONS', 'bank')
-excel2sql("data/terminals_03032021.xlsx", conf, 'STG_TERMINALS', 'bank', )
-excel2sql("data/passport_blacklist_03032021.xlsx", conf, 'STG_PASSPORT_BLACKLIST', 'bank')
+csv2sql("data/transactions_01032021.txt", conf, 'STG_TRANSACTIONS', 'bank')
+excel2sql("data/terminals_01032021.xlsx", conf, 'STG_TERMINALS', 'bank', )
+excel2sql("data/passport_blacklist_01032021.xlsx", conf, 'STG_PASSPORT_BLACKLIST', 'bank')
 create_dwh_fact()
 update_dwh_fact()
 create_dwh_dim_tables()
@@ -499,6 +559,8 @@ update_terminal_hist()
 create_rep_fraud()
 check_passport_valid_to()
 check_account_valid_to()
+check_passport_in_blacklist()
+check_different_city()
 update_rep_fraud()
 remove_view()
 
